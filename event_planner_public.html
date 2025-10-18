@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Collaborative Event Planner</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for aesthetic */
+        body { font-family: 'Inter', sans-serif; background-color: #f7f9fc; }
+        .card { box-shadow: 0 8px 10px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.08); }
+        /* Custom spinner for loading states */
+        .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #3b82f6; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        /* Responsive list items - ensure full width on small screens */
+        .list-item-task { flex-direction: column; align-items: flex-start; }
+        @media (min-width: 640px) {
+            .list-item-task { flex-direction: row; align-items: center; }
+        }
+        /* Style for the custom modal buttons */
+        #modal-actions button { margin-top: 8px; }
+    </style>
+</head>
+<body class="p-4 sm:p-8">
+
+    <div id="app" class="max-w-4xl mx-auto">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-extrabold text-blue-600">Collaborative Event Planner</h1>
+            <p class="text-gray-500 mt-2">Plan an event with real-time updates for everyone.</p>
+            <!-- User ID Display (CRITICAL for multi-user apps) -->
+            <p class="text-sm mt-3 p-2 bg-yellow-100 border border-yellow-300 rounded-lg text-yellow-800 break-words">
+                ⚠️ **User ID:** <span id="user-id" class="font-mono font-bold">... Authenticating ...</span>
+            </p>
+        </header>
+
+        <main class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- Event Details Card (Col 1-2) -->
+            <section class="lg:col-span-2 p-6 bg-white rounded-xl card h-full">
+                <h2 class="text-2xl font-semibold text-gray-700 mb-4">Event Details & Tasks</h2>
+                
+                <div class="space-y-4">
+                    <!-- Event Name -->
+                    <div>
+                        <label for="eventName" class="block text-sm font-medium text-gray-700">Event Name</label>
+                        <input type="text" id="eventName" placeholder="e.g., Summer Hackathon 2025"
+                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-3 focus:border-blue-500 focus:ring-blue-500">
+                    </div>
+
+                    <!-- Event Date -->
+                    <div>
+                        <label for="eventDate" class="block text-sm font-medium text-gray-700">Date</label>
+                        <input type="date" id="eventDate"
+                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-3 focus:border-blue-500 focus:ring-blue-500">
+                    </div>
+
+                    <!-- Task Input -->
+                    <div class="flex space-x-2">
+                        <input type="text" id="newTaskInput" placeholder="Add a new task (e.g., Book the venue)"
+                            class="flex-grow rounded-md border-gray-300 shadow-sm p-3 focus:border-blue-500 focus:ring-blue-500">
+                        <button id="addTaskBtn" class="bg-blue-500 hover:bg-blue-600 text-white font-semibold py-3 px-4 rounded-lg shadow-md transition duration-150">
+                            Add Task
+                        </button>
+                    </div>
+
+                    <!-- Task List -->
+                    <div>
+                        <h3 class="text-lg font-medium text-gray-700 mb-2">Planning Checklist</h3>
+                        <ul id="taskList" class="space-y-2">
+                            <!-- Tasks will be injected here -->
+                            <li id="loading-tasks" class="text-gray-500 italic p-3 border-l-4 border-gray-200 rounded-lg">Loading real-time data...</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Gemini Planning Assistant (Col 3) -->
+            <section class="lg:col-span-1 p-6 bg-blue-50 rounded-xl card h-full flex flex-col">
+                <h2 class="text-2xl font-semibold text-blue-700 mb-4">AI Assistant (Gemini)</h2>
+                
+                <div class="space-y-4 flex-grow">
+                    <p class="text-sm text-blue-600">Use the AI to draft invitations or brainstorm ideas based on your event name.</p>
+
+                    <!-- Idea Generation Button -->
+                    <button id="getIdeasBtn" class="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-3 px-4 rounded-lg shadow-md transition duration-150">
+                        <span id="ideasBtnText">Get Event Planning Ideas</span>
+                        <div id="ideasSpinner" class="spinner mx-auto hidden"></div>
+                    </button>
+                    
+                    <!-- Invitation Draft Button -->
+                    <button id="getDraftBtn" class="w-full bg-purple-500 hover:bg-purple-600 text-white font-semibold py-3 px-4 rounded-lg shadow-md transition duration-150">
+                        <span id="draftBtnText">Draft Invitation Email</span>
+                        <div id="draftSpinner" class="spinner mx-auto hidden"></div>
+                    </button>
+
+                    <!-- AI Output -->
+                    <div id="aiOutput" class="mt-4 p-4 bg-white border border-blue-200 rounded-lg max-h-96 overflow-y-auto text-sm text-gray-700">
+                        The assistant's response will appear here.
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Custom Error/Status Modal (Replaces alert/confirm) -->
+    <div id="modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-lg p-6 w-full max-w-sm shadow-xl">
+            <h3 id="modalTitle" class="text-lg font-semibold text-red-600 mb-4">Error</h3>
+            <p id="modalMessage" class="text-gray-700 mb-4">An error occurred.</p>
+            <div id="modal-actions" class="mt-4">
+                <!-- Buttons are injected here for confirmation, or a single Close button is shown by default -->
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // ========================================================================================
+        // 🔥 SECURE CONFIGURATION: USING CANVAS GLOBAL VARIABLES (Ready for GitHub)
+        // ========================================================================================
+
+        // Get environment variables or provide robust fallbacks
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-event-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        
+        // Use an empty string for the API Key; the environment provides it during fetch.
+        const GEMINI_API_KEY = "";
+        
+        // The URL for the Gemini API call
+        const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${GEMINI_API_KEY}`;
+        
+        // If config is missing (outside of the Canvas environment), show a setup error.
+        if (!firebaseConfig) {
+            console.error("CRITICAL ERROR: Firebase configuration is missing.");
+            document.getElementById('user-id').textContent = 'SETUP FAILED';
+        }
+
+        // ========================================================================================
+        // 🚀 FIREBASE IMPORTS AND INITIALIZATION
+        // ========================================================================================
+
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { 
+            getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken 
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { 
+            getFirestore, doc, setDoc, onSnapshot, collection, runTransaction
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        setLogLevel('Debug'); // Enable detailed Firebase logging
+
+        let app;
+        let db;
+        let auth;
+        let userId = '';
+
+        const MAX_RETRIES = 3;
+        const BASE_DELAY_MS = 1000; // 1 second
+
+        const elements = {
+            userIdDisplay: document.getElementById('user-id'),
+            eventName: document.getElementById('eventName'),
+            eventDate: document.getElementById('eventDate'),
+            taskList: document.getElementById('taskList'),
+            newTaskInput: document.getElementById('newTaskInput'),
+            addTaskBtn: document.getElementById('addTaskBtn'),
+            getIdeasBtn: document.getElementById('getIdeasBtn'),
+            ideasBtnText: document.getElementById('ideasBtnText'),
+            ideasSpinner: document.getElementById('ideasSpinner'),
+            getDraftBtn: document.getElementById('getDraftBtn'),
+            draftBtnText: document.getElementById('draftBtnText'),
+            draftSpinner: document.getElementById('draftSpinner'),
+            aiOutput: document.getElementById('aiOutput'),
+            modal: document.getElementById('modal'),
+            modalTitle: document.getElementById('modalTitle'),
+            modalMessage: document.getElementById('modalMessage'),
+            modalActions: document.getElementById('modal-actions'),
+        };
+
+        // Helper function to show custom modal (replacing alert/confirm)
+        const showModal = (title, message, isError = true) => {
+            elements.modalTitle.textContent = title;
+            elements.modalMessage.textContent = message;
+            elements.modalTitle.classList.toggle('text-red-600', isError);
+            elements.modalTitle.classList.toggle('text-blue-600', !isError);
+            elements.modal.classList.remove('hidden');
+            elements.modal.classList.add('flex');
+            
+            // Clear previous actions
+            elements.modalActions.innerHTML = '';
+
+            // Default close button
+            const closeBtn = document.createElement('button');
+            closeBtn.textContent = 'Close';
+            closeBtn.className = 'w-full bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 rounded-lg transition duration-150';
+            closeBtn.onclick = () => {
+                elements.modal.classList.add('hidden');
+            };
+            elements.modalActions.appendChild(closeBtn);
+        };
+        
+        // Helper function for confirmation modal
+        const showConfirmModal = (message) => new Promise(resolve => {
+            elements.modalTitle.textContent = "Confirm Action";
+            elements.modalMessage.textContent = message;
+            elements.modalTitle.classList.remove('text-red-600');
+            elements.modalTitle.classList.add('text-blue-600');
+            elements.modal.classList.remove('hidden');
+            elements.modal.classList.add('flex');
+            elements.modalActions.innerHTML = ''; // Clear default buttons
+
+            const confirmBtn = document.createElement('button');
+            confirmBtn.textContent = 'Confirm';
+            confirmBtn.className = 'w-full bg-red-500 hover:bg-red-600 text-white font-semibold py-2 rounded-lg transition duration-150';
+            
+            const cancelBtn = document.createElement('button');
+            cancelBtn.textContent = 'Cancel';
+            cancelBtn.className = 'w-full bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-2 rounded-lg transition duration-150 mt-2';
+
+            confirmBtn.onclick = () => {
+                elements.modal.classList.add('hidden');
+                resolve(true);
+            };
+            cancelBtn.onclick = () => {
+                elements.modal.classList.add('hidden');
+                resolve(false);
+            };
+
+            elements.modalActions.appendChild(confirmBtn);
+            elements.modalActions.appendChild(cancelBtn);
+        });
+
+
+        // --- Firebase Initialization and Auth ---
+
+        if (firebaseConfig) {
+            try {
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+            } catch (error) {
+                console.error("Firebase Initialization Error:", error);
+                showModal("Setup Error", "Firebase failed to initialize. Check console for details.", true);
+            }
+        }
+
+        // Firestore Pathing (Mandatory structure for public data)
+        const PUBLIC_DATA_PATH = `/artifacts/${appId}/public/data/events`;
+        const PUBLIC_EVENT_DOC_REF = doc(db, PUBLIC_DATA_PATH, 'event_plan_doc');
+
+        // Authentication Handler
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                userId = user.uid;
+                elements.userIdDisplay.textContent = userId;
+                console.log(`User authenticated with ID: ${userId}`);
+                
+                // Initialize/Ensure document exists and start listeners
+                await initializeEventDocument();
+                initializeDataListeners();
+                setupEventListeners();
+
+            } else {
+                // Handle initial authentication when the component loads
+                try {
+                    if (initialAuthToken) {
+                        await signInWithCustomToken(auth, initialAuthToken);
+                        console.log("Signed in with custom token.");
+                    } else {
+                        await signInAnonymously(auth);
+                        console.log("Signed in anonymously.");
+                    }
+                } catch (error) {
+                    console.error("Authentication Failed:", error);
+                    showModal("Authentication Failed", "Could not sign in. Check Firebase Auth settings or token.", true);
+                }
+            }
+        });
+
+        // Initialize or update the main event document with default structure
+        const initializeEventDocument = async () => {
+            try {
+                // Use a transaction to safely read and write, ensuring we don't overwrite concurrent changes
+                await runTransaction(db, async (transaction) => {
+                    const docSnapshot = await transaction.get(PUBLIC_EVENT_DOC_REF);
+                    
+                    if (!docSnapshot.exists()) {
+                        console.log("Creating initial event document.");
+                        // Only set minimal initial data
+                        transaction.set(PUBLIC_EVENT_DOC_REF, {
+                            name: "Collaborative Event Plan",
+                            date: "",
+                            createdAt: new Date().toISOString()
+                        });
+                    }
+                });
+            } catch (error) {
+                console.error("Failed to initialize event document:", error);
+            }
+        };
+
+        // --- Firestore Data Handlers ---
+
+        const initializeDataListeners = () => {
+            // 1. Listen to the main Event Document (Name and Date)
+            onSnapshot(PUBLIC_EVENT_DOC_REF, (docSnap) => {
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    // Only update the input fields if they don't have focus to prevent interrupting typing
+                    if (document.activeElement !== elements.eventName) {
+                        elements.eventName.value = data.name || '';
+                    }
+                    if (document.activeElement !== elements.eventDate) {
+                        elements.eventDate.value = data.date || '';
+                    }
+                    console.log("Event details updated:", data.name);
+                } else {
+                    console.warn("Event document not found after initialization attempt.");
+                }
+            }, (error) => {
+                console.error("Error listening to event document:", error);
+                showModal("Data Error", "Failed to listen for real-time event details.", true);
+            });
+
+            // 2. Listen to the Tasks Sub-collection
+            const tasksCollectionRef = collection(db, PUBLIC_DATA_PATH, 'event_plan_doc', 'tasks');
+            onSnapshot(tasksCollectionRef, (snapshot) => {
+                const tasks = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                renderTasks(tasks);
+                console.log(`Tasks updated. Total tasks: ${tasks.length}`);
+                
+            }, (error) => {
+                console.error("Error listening to tasks:", error);
+                showModal("Data Error", "Failed to listen for real-time tasks.", true);
+            });
+        };
+        
+        // --- UI Rendering ---
+
+        const renderTasks = (tasks) => {
+            elements.taskList.innerHTML = '';
+            
+            // Remove the loading indicator once data is being rendered
+            if (document.getElementById('loading-tasks')) {
+                 document.getElementById('loading-tasks').remove();
+            }
+
+            if (tasks.length === 0) {
+                 elements.taskList.innerHTML = `<li class="text-gray-500 italic p-2 border-l-4 border-gray-200 rounded-lg">No tasks yet. Add one to start planning!</li>`;
+                 return;
+            }
+
+            // Sort tasks by completed status (incomplete first) and then by creation date (newest last)
+            tasks.sort((a, b) => {
+                if (a.completed && !b.completed) return 1;
+                if (!a.completed && b.completed) return -1;
+                // Sort by timestamp if available
+                return (a.timestamp?.toMillis() || 0) - (b.timestamp?.toMillis() || 0); 
+            }).forEach(task => {
+                const listItem = document.createElement('li');
+                listItem.className = `list-item-task flex items-center justify-between p-3 rounded-lg transition duration-150 ${task.completed ? 'bg-green-50 border-l-4 border-green-400 line-through text-gray-500' : 'bg-white border-l-4 border-blue-400 hover:bg-gray-50'}`;
+                listItem.innerHTML = `
+                    <div class="flex items-center flex-grow w-full">
+                        <input type="checkbox" id="task-${task.id}" ${task.completed ? 'checked' : ''} 
+                            class="h-5 w-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer flex-shrink-0"
+                            data-task-id="${task.id}">
+                        <label for="task-${task.id}" class="ml-3 text-base break-words flex-grow">${task.text}</label>
+                    </div>
+                    <button class="delete-task-btn text-red-400 hover:text-red-600 transition duration-150 ml-4 p-1 rounded flex-shrink-0" 
+                            data-task-id="${task.id}" title="Delete Task">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 pointer-events-none" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 10-2 0v6a1 1 0 102 0V8z" clip-rule="evenodd" />
+                        </svg>
+                    </button>
+                `;
+                elements.taskList.appendChild(listItem);
+            });
+        };
+        
+        // --- Interaction Handlers ---
+
+        const updateEventDetails = async (field, value) => {
+            try {
+                // Note: setDoc with merge:true is used here, which is equivalent to updateDoc if the document exists
+                await setDoc(PUBLIC_EVENT_DOC_REF, { [field]: value }, { merge: true });
+                // No console log on success to reduce noise during typing/changes
+            } catch (error) {
+                console.error(`Error updating event ${field}:`, error);
+                showModal("Save Error", `Failed to update event ${field}.`, true);
+            }
+        };
+
+        const addTask = async () => {
+            const taskText = elements.newTaskInput.value.trim();
+            if (!taskText) {
+                showModal("Input Needed", "Please enter a task description.", false);
+                return;
+            }
+
+            try {
+                const tasksCollectionRef = collection(db, PUBLIC_DATA_PATH, 'event_plan_doc', 'tasks');
+                await setDoc(doc(tasksCollectionRef), { // Using setDoc on a new doc reference for atomic creation
+                    text: taskText,
+                    completed: false,
+                    // Use Firestore Server Timestamp for reliable sorting
+                    timestamp: new Date() 
+                }); 
+                elements.newTaskInput.value = '';
+                console.log("Task added successfully.");
+            } catch (error) {
+                console.error("Error adding task:", error);
+                showModal("Task Error", "Failed to add the task.", true);
+            }
+        };
+
+        const toggleTaskCompletion = async (taskId, isCompleted) => {
+            const taskDocRef = doc(db, PUBLIC_DATA_PATH, 'event_plan_doc', 'tasks', taskId);
+            try {
+                await setDoc(taskDocRef, { completed: isCompleted }, { merge: true });
+                console.log(`Task ${taskId} completion set to ${isCompleted}.`);
+            } catch (error) {
+                console.error("Error toggling task completion:", error);
+                showModal("Task Error", "Failed to update task status.", true);
+            }
+        };
+
+        const deleteTask = async (taskId) => {
+            const isConfirmed = await showConfirmModal("Are you sure you want to permanently delete this task?");
+            
+            if (!isConfirmed) return;
+
+            const taskDocRef = doc(db, PUBLIC_DATA_PATH, 'event_plan_doc', 'tasks', taskId);
+            try {
+                await deleteDoc(taskDocRef);
+                console.log(`Task ${taskId} deleted successfully.`);
+            } catch (error) {
+                console.error("Error deleting task:", error);
+                showModal("Task Error", "Failed to delete the task.", true);
+            }
+        };
+
+        const setupEventListeners = () => {
+            // Event Name/Date Update Listeners (using 'input' for smoother real-time collaboration)
+            elements.eventName.addEventListener('input', (e) => updateEventDetails('name', e.target.value));
+            elements.eventDate.addEventListener('input', (e) => updateEventDetails('date', e.target.value));
+
+            // Task Creation Listeners
+            elements.addTaskBtn.addEventListener('click', addTask);
+            elements.newTaskInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault(); // Prevent accidental form submission
+                    addTask();
+                }
+            });
+
+            // Task List (Delegated Checkbox/Delete Listeners)
+            elements.taskList.addEventListener('click', (e) => {
+                const checkbox = e.target.closest('input[type="checkbox"]');
+                const deleteBtn = e.target.closest('.delete-task-btn');
+
+                if (checkbox) {
+                    toggleTaskCompletion(checkbox.dataset.taskId, checkbox.checked);
+                } else if (deleteBtn) {
+                    deleteTask(deleteBtn.dataset.taskId);
+                }
+            });
+
+            // Gemini Assistant Listeners
+            elements.getIdeasBtn.addEventListener('click', () => callGemini('ideas'));
+            elements.getDraftBtn.addEventListener('click', () => callGemini('draft'));
+        };
+
+
+        // --- Gemini AI Functions ---
+
+        const exponentialBackoffFetch = async (url, options, maxRetries) => {
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                try {
+                    const response = await fetch(url, options);
+                    
+                    if (response.ok) {
+                        return response;
+                    }
+                    // Handle rate limiting (429) or other retryable errors
+                    if ((response.status === 429 || response.status >= 500) && attempt < maxRetries - 1) { 
+                        const delay = BASE_DELAY_MS * 2 ** attempt;
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        continue;
+                    }
+                    throw new Error(`HTTP error! Status: ${response.status} - ${response.statusText}`);
+                } catch (error) {
+                    if (attempt === maxRetries - 1) {
+                        throw error;
+                    }
+                    const delay = BASE_DELAY_MS * 2 ** attempt;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
+            throw new Error("API request failed after multiple retries.");
+        };
+
+        const callGemini = async (type) => {
+            const eventName = elements.eventName.value.trim() || "a general event";
+            const isIdeas = type === 'ideas';
+            const buttonId = isIdeas ? 'getIdeasBtn' : 'getDraftBtn';
+            const spinnerId = isIdeas ? 'ideasSpinner' : 'draftSpinner';
+            const buttonTextId = isIdeas ? 'ideasBtnText' : 'draftBtnText';
+            
+            // Set Loading State
+            document.getElementById(spinnerId).classList.remove('hidden');
+            document.getElementById(buttonTextId).textContent = isIdeas ? 'Generating Ideas...' : 'Drafting Email...';
+            document.getElementById(buttonId).disabled = true;
+            elements.aiOutput.innerHTML = `<div class="text-center text-blue-500 flex items-center justify-center"><div class="spinner mr-2"></div> Generating content...</div>`;
+
+            const systemPrompt = isIdeas
+                ? `You are an expert event planner. Given an event name, provide three distinct, creative planning ideas, including a theme suggestion, a catering suggestion, and an interactive activity suggestion. Format the output in clean markdown with headers and bullet points.`
+                : `You are a professional email assistant. Draft a short, engaging, and friendly invitation email for the event named "${eventName}". Include placeholders for Date/Time, Location, and RSVP link. Do not use markdown for the body of the email, use only plain text formatting with clear line breaks.`;
+            
+            const userQuery = isIdeas 
+                ? `Generate planning suggestions for the event: "${eventName}"`
+                : `Draft the invitation email now.`;
+
+            const payload = {
+                contents: [{ parts: [{ text: userQuery }] }],
+                // Use Google Search for grounding when generating ideas
+                tools: isIdeas ? [{ "google_search": {} }] : undefined,
+                systemInstruction: { parts: [{ text: systemPrompt }] },
+            };
+
+            const options = {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            };
+
+            try {
+                const response = await exponentialBackoffFetch(GEMINI_API_URL, options, MAX_RETRIES);
+                const result = await response.json();
+                
+                const candidate = result.candidates?.[0];
+
+                if (candidate && candidate.content?.parts?.[0]?.text) {
+                    const text = candidate.content.parts[0].text;
+                    let sourcesHtml = '';
+                    
+                    // Handle citations (only present if Google Search grounding was used)
+                    const groundingMetadata = candidate.groundingMetadata;
+                    if (groundingMetadata && groundingMetadata.groundingAttributions) {
+                        const sources = groundingMetadata.groundingAttributions
+                            .map(attribution => ({ uri: attribution.web?.uri, title: attribution.web?.title }))
+                            .filter(source => source.uri && source.title);
+                        
+                        if (sources.length > 0) {
+                            sourcesHtml = `<h4 class="text-sm font-semibold mt-4 pt-2 border-t border-gray-100">Sources:</h4><ul class="list-disc list-inside text-xs space-y-1">`;
+                            sources.forEach((source) => {
+                                sourcesHtml += `<li><a href="${source.uri}" target="_blank" class="text-blue-500 hover:text-blue-700 truncate block">${source.title}</a></li>`;
+                            });
+                            sourcesHtml += `</ul>`;
+                        }
+                    }
+
+                    // Basic Markdown to HTML conversion for ideas, or <pre> for drafts
+                    let formattedText;
+                    if (isIdeas) {
+                        // Very simple markdown conversion for display
+                        formattedText = text
+                            .replace(/^### (.*)$/gm, '<h5 class="text-base font-semibold mt-3">$1</h5>')
+                            .replace(/^## (.*)$/gm, '<h4 class="text-lg font-semibold mt-4">$1</h4>')
+                            .replace(/^\* (.*)$/gm, '<li>$1</li>')
+                            .replace(/\n\n/g, '</p><p class="mt-2">')
+                            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                        formattedText = `<p>${formattedText}</p>`;
+                        formattedText = formattedText.replace(/<\/p><p class="mt-2"><li>/g, '<ul><li>').replace(/<\/li><\/p><p class="mt-2">/g, '</li></ul><p class="mt-2">');
+                        formattedText = formattedText.replace(/<\/li><\/p>/g, '</li></ul>').replace(/<ul><li>/g, '<ul class="list-disc list-inside mt-2 ml-4"><li>');
+                    } else {
+                        formattedText = `<pre class="whitespace-pre-wrap font-mono text-sm p-2 bg-gray-100 rounded">${text}</pre>`;
+                    }
+
+
+                    elements.aiOutput.innerHTML = formattedText + sourcesHtml;
+
+                } else {
+                    elements.aiOutput.innerHTML = `<p class="text-red-500">Error: Could not generate content. Check the console for API errors.</p>`;
+                    console.error("Gemini Response Error:", result);
+                }
+
+            } catch (error) {
+                elements.aiOutput.innerHTML = `<p class="text-red-500">API Call Failed: ${error.message}. Please check your API key setup.</p>`;
+                console.error("Gemini Fetch Error:", error);
+            } finally {
+                // Restore button state
+                document.getElementById(spinnerId).classList.add('hidden');
+                document.getElementById(buttonTextId).textContent = isIdeas ? 'Get Event Planning Ideas' : 'Draft Invitation Email';
+                document.getElementById(buttonId).disabled = false;
+            }
+        };
+
+        // Start everything on window load
+        window.onload = function () {
+            // Authentication flow initiates everything else in onAuthStateChanged
+        }
+
+    </script>
+</body>
+</html>
